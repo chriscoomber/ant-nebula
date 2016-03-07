@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # Instance: load software - running on a load generator VM
+import os
 import subprocess
 import stat
 
