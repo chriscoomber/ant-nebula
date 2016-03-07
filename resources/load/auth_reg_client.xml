@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+
+<!-- This program is free software; you can redistribute it and/or      -->
+<!-- modify it under the terms of the GNU General Public License as     -->
+<!-- published by the Free Software Foundation; either version 2 of the -->
+<!-- License, or (at your option) any later version.                    -->
+<!--                                                                    -->
+<!-- This program is distributed in the hope that it will be useful,    -->
+<!-- but WITHOUT ANY WARRANTY; without even the implied warranty of     -->
+<!-- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the      -->
+<!-- GNU General Public License for more details.                       -->
+<!--                                                                    -->
+<!-- You should have received a copy of the GNU General Public License  -->
+<!-- along with this program; if not, write to the                      -->
+<!-- Free Software Foundation, Inc.,                                    -->
+<!-- 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA             -->
+<!--                                                                    -->
+<!--                 Sipp default 'branchc' scenario.                   -->
+<!--                                                                    -->
+
+<scenario name="register_client">
+
+  <!-- Send REGISTER.                                                    -->
+  <send>
+    <![CDATA[
+
+      REGISTER sip:[field2] SIP/2.0
+      Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+      From: <sip:[field0]@[field2]>;tag=[pid]SIPpTag07[call_number]
+      To: <sip:[field0]@[field2]>
+      Call-ID: [call_id]
+      CSeq:  1 REGISTER
+      Contact: sip:[field0]@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Content-Length: 0
+      Expires: 14400
+
+    ]]>
+  </send>
+
+  <!-- Receive response.                                                  -->
+  <recv response="401" timeout="10000" auth="true"/>
+
+  <send>
+    <![CDATA[
+
+      REGISTER sip:[field2] SIP/2.0
+      From: <sip:[field0]@[field2]>;tag=[pid]SIPpTag07[call_number]+1
+      To: <sip:[field0]@[field2]>
+      Call-ID: [call_id]
+      CSeq:  2 REGISTER
+      Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]+1
+      Max-Forwards: 70
+      Allow: INVITE, ACK, INFO, CANCEL, BYE
+      User-Agent: SIPp Tester
+      Supported: testextension
+      Contact: sip:[field0]@[local_ip]:[local_port]
+      [field1]
+      Content-Length: [len]
+      Expires: 14400
+
+    ]]>
+  </send>
+
+<recv response="200" timeout="10000"/>
+
+
+</scenario>

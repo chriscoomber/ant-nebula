@@ -1,0 +1,162 @@
+tosca_definitions_version: cloudify_dsl_1_2
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/3.3.1/types.yaml
+  - http://www.getcloudify.org/spec/openstack-plugin/1.3.1/plugin.yaml
+  - http://www.getcloudify.org/spec/diamond-plugin/1.3.1/plugin.yaml
+
+
+inputs:
+  ssc_address:
+    description: Address of SSC to send load to
+    type: string
+  ssc_port:
+    description: Access port of SSC to send load to
+    type: integer
+    default: 5060
+  sip_domain:
+    description: SIP domain name
+    type: string
+    default: cloudify.test
+  area_codes:
+    description: >
+      Comma-separated list of area codes for which the numbers XXX-555-0000 to XXX-555-1999 have
+      been provisioned and reserved for use by the load generator.
+    type: string
+  sip_password:
+    description: SIP password that each load SIP account is authorized with
+    type: string
+    default: 7kkzTyGW
+  call_rate:
+    description: Calls per second per load server
+    type: integer
+    default: 1
+  ubuntu_image_id:
+    description: UUID of an Ubuntu 14.04 image
+    type: string
+    default: 1276d72f-6504-4df1-aa1c-acf161286b6e # Ubuntu 14.04
+  # TODO: replace this with a new "load" flavour.
+  clearwater_flavor_name:
+    description: Name of the flavor to use for Clearwater instances
+    type: string
+    default: clearwater.core
+  ntp_servers:
+    description: Comma-separated list of NTP IP addresses
+    type: string
+    default: 10.254.123.1,10.254.123.2,10.254.123.3
+  management_cidr:
+    description: Management subnet
+    type: string
+    default: 10.67.79.0/24
+
+
+outputs:
+  calls_generated_statstic:
+    description: Query locator of the load generator's statistics
+    # TODO: actually produce something like: /cc3-20\..*?\.LoadCollector_calls_total/, with deployment id - or maybe even entire json
+    value: "LoadCollector_calls_total"
+
+
+node_types:
+  metaswitch.nodes.MonitoredSoftwareComponent:
+    derived_from: cloudify.nodes.SoftwareComponent
+    properties:
+      collectors_config: {}
+
+
+relationships:
+  metaswitch.relationships.load_generator_in_cluster:
+    derived_from: cloudify.relationships.connected_to
+    properties:
+      connection_type:
+        default: all_to_one
+    source_interfaces:
+      cloudify.interfaces.relationship_lifecycle:
+        preconfigure:
+          implementation: scripts/relationships/load_cluster/add_instance.py
+        unlink:
+          implementation: scripts/relationships/load_cluster/remove_instance.py
+
+
+node_templates:
+  default_security_group:
+    type: cloudify.openstack.nodes.SecurityGroup
+    properties:
+      security_group:
+         description: Default security group
+      rules:
+        - remote_ip_prefix: { get_input: management_cidr }
+          protocol: null
+          port: null
+
+
+  load_cluster:
+    type: cloudify.nodes.Root
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: scripts/tasks/load_cluster/create.py
+          executor: central_deployment_agent
+          inputs:
+            area_codes: { get_input: area_codes }
+
+
+  load_vm:
+    type: cloudify.openstack.nodes.Server
+    instances:
+      deploy: 1
+    properties:
+      image: { get_input: ubuntu_image_id }
+      flavor: { get_input: clearwater_flavor_name }
+      agent_config:
+        user: ubuntu
+    interfaces:
+      cloudify.interfaces.monitoring_agent:
+        install:
+          implementation: diamond.diamond_agent.tasks.install
+          inputs:
+            diamond_config:
+              interval: 20
+        start: diamond.diamond_agent.tasks.start
+        stop: diamond.diamond_agent.tasks.stop
+        uninstall: diamond.diamond_agent.tasks.uninstall
+    relationships:
+      - type: cloudify.openstack.server_connected_to_security_group
+        target: default_security_group
+
+
+  load:
+    type: metaswitch.nodes.MonitoredSoftwareComponent
+    properties:
+      collectors_config:
+        LoadCollector:
+          path: collectors/load.py
+        CPUCollector: {}
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: scripts/tasks/load_software/create.py
+          inputs:
+            ntp_servers: { get_input: ntp_servers }
+        start:
+          implementation: scripts/tasks/load_software/start.sh
+          inputs:
+            ssc_address: { get_input: ssc_address }
+            ssc_port: { get_input: ssc_port }
+            sip_domain: { get_input: sip_domain }
+            sip_password: { get_input: sip_password }
+            call_rate: { get_input: call_rate }
+      cloudify.interfaces.monitoring:
+        start:
+          implementation: diamond.diamond_agent.tasks.add_collectors
+          inputs:
+            collectors_config: { get_property: [SELF, collectors_config] }
+        stop:
+          implementation: diamond.diamond_agent.tasks.del_collectors
+          inputs:
+            collectors_config: { get_property: [SELF, collectors_config] }
+    relationships:
+      - type: cloudify.relationships.contained_in
+        target: load_vm
+      - type: metaswitch.relationships.load_generator_in_cluster
+        target: load_cluster
